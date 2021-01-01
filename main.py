@@ -4,6 +4,8 @@ import threading
 
 
 q = queue.Queue()
+lock = threading.Lock()
+
 
 class DBManager:
 
@@ -34,7 +36,7 @@ class DBManager:
         commands = ("""CREATE TABLE IF NOT EXISTS sweets (
                         name text ,
                         has_left int,
-                        more_than_0 int check (has_left > 0),
+                        check (has_left >= 0),
                         PRIMARY KEY(name)
                     );""",
                     """CREATE TABLE IF NOT EXISTS packs (
@@ -75,7 +77,7 @@ class DBManager:
 
 
     def fill_db(self, sweets_list, resemblance_list):
-        sweets_insert_command = ("INSERT INTO sweets(name, has_left, more_than_0) VALUES(%s, %s, %s);")
+        sweets_insert_command = ("INSERT INTO sweets(name, has_left) VALUES(%s, %s);")
         resemblance_insert_command = ("""INSERT INTO sweet_resemblance(sweet_1, sweet_2, resemblance) VALUES(%s, %s, %s);""")
 
         try:
@@ -111,6 +113,7 @@ class DBManager:
             assert (cur.rowcount == 1)
 
             # przyjmujemy zalozenie, ze wysylamy paczki jednego typu
+            print(recipent, sweets_list)
             for sweet in sweets_list:
                 found_sweet = False
 
@@ -137,14 +140,17 @@ class DBManager:
                         break
 
                 if not found_sweet:
+                    print("ERROR")
                     self.conn.rollback()
                     return False
 
             self.conn.commit()
+            print("SUCCESS")
             return True
 
         except (Exception, psycopg2.DatabaseError) as error:
-            print(error)
+            # with lock:
+            print("error", error)
 
 
 class DataGenerator:
@@ -155,10 +161,10 @@ class DataGenerator:
 
     def get_sweets(self):
         sweets_list = []
-        sweets_list.append(('chocolate', 5, 1,))
-        sweets_list.append(('lollypop', 100, 1,))
-        sweets_list.append(('biscuit', 5, 1,))
-        sweets_list.append(('cake', 100, 1,))
+        sweets_list.append(('chocolate', 5))
+        sweets_list.append(('lollypop', 100))
+        sweets_list.append(('biscuit', 5))
+        sweets_list.append(('cake', 100))
         return sweets_list
 
     def get_resemblance(self):
@@ -182,9 +188,11 @@ class DataGenerator:
             q.put({"id": i, "country": random.choice(self.countries), "recipient": random.choice(self.names), "list": l})
 
 def worker():
-    letter = q.get()
     manager = DBManager()
-    manager.do_transaction(letter["id"], letter["country"], letter["recipient"], letter["list"])
+    for _ in range(5):
+        letter = q.get()
+        success = manager.do_transaction(letter["id"], letter["country"], letter["recipient"], letter["list"])
+
 
 
 if __name__ == '__main__':
@@ -198,9 +206,9 @@ if __name__ == '__main__':
 
     data_generator.fill_sweets_queue_2()
 
-    worker()
-    # threads = []
-    # for _ in range(1, 5):
-    #     t = threading.Thread(target=worker)
-    #     threads.append(t)
-    #     t.start()
+    # worker()
+    threads = []
+    for _ in range(5):
+        t = threading.Thread(target=worker)
+        threads.append(t)
+        t.start()
