@@ -1,7 +1,8 @@
 import queue ,random
 import psycopg2
 import threading
-
+import string
+import time
 
 q = queue.Queue()
 lock = threading.Lock()
@@ -102,7 +103,7 @@ class DBManager:
         self.conn.set_isolation_level(isolation_levels[level])
 
 
-    def do_transaction(self, id, country, recipent, sweets_list):
+    def do_transaction_no_retry(self, id, country, recipent, sweets_list):
         try:
             # todo change me
             self.set_isolation_level("READ_UNCOMMITTED")
@@ -145,7 +146,7 @@ class DBManager:
                     return False
 
             self.conn.commit()
-            print("SUCCESS")
+            print("SUCCESS SUCCESS SUCCESS SUCCESS SUCCESS SUCCESS SUCCESS")
             return True
 
         except (Exception, psycopg2.DatabaseError) as error:
@@ -155,19 +156,28 @@ class DBManager:
 
 class DataGenerator:
     def __init__(self):
-        self.sweets = ["chocolate", "lollypop", "biscuit", "cake"]
+        self.sweets_1 = ["chocolate", "lollypop", "biscuit", "cake"]
+        self.sweets_2 = []
+        for _ in range (100):
+            self.sweets_2.append(''.join(random.choices(string.ascii_uppercase, k=10)))
         self.countries = ["Poland", "Germany", "France", "UK", "USA", "Norway", "Sweden"]
         self.names = ["Damian", "John", "Steve", "Mary", "Anne", "Jane"]
 
-    def get_sweets(self):
+    def get_sweets_1(self):
         sweets_list = []
         sweets_list.append(('chocolate', 5))
         sweets_list.append(('lollypop', 100))
         sweets_list.append(('biscuit', 5))
         sweets_list.append(('cake', 100))
         return sweets_list
+    
+    def get_sweets_2(self):
+        sweet_list = []
+        for sweet in self.sweets_2:
+            sweet_list.append((sweet, random.randrange(0, 1000)))
+        return sweet_list
 
-    def get_resemblance(self):
+    def get_resemblance_1(self):
         resemblane_list = []
         resemblane_list.append(('chocolate', 'lollypop', 0.5))
         resemblane_list.append(('lollypop', 'chocolate', 0.5))
@@ -175,40 +185,73 @@ class DataGenerator:
         resemblane_list.append(('cake', 'biscuit', 0.5))
         return resemblane_list
 
-    def fill_sweets_queue(self):
-        for i in range (1, 100):
-            q.put({"id": random.randrange(10), "number": random.randrange(50), "sweet": random.choice(self.sweets)})
+    def get_resemblance_2(self):
+        resemblane_list = []
+        for _ in range (1000):
+            sweet_1 = random.choice(self.sweets_2)
+            sweet_2 = random.choice(self.sweets_2)
+            if sweet_1 == sweet_2:
+                continue
+            resemblane_list.append((sweet_1, sweet_2, random.uniform(0, 1)))
+        return resemblane_list
 
-    def fill_sweets_queue_2(self):
+    # def fill_sweets_queue(self):
+    #     for i in range (1, 1000):
+    #         q.put({"id": i, "number": random.randrange(50), "sweet": random.choice(self.sweets)})
+
+    def fill_sweets_queue_1(self):
         for i in range (1, 1000):
             l = []
             items_on_list = random.randrange(4)
-            for _ in range (1, items_on_list):
-                l.append({"number": random.randrange(20), "name": random.choice(self.sweets)})
+            for _ in range (items_on_list):
+                l.append({"number": random.randrange(20), "name": random.choice(self.sweets_1)})
+            q.put({"id": i, "country": random.choice(self.countries), "recipient": random.choice(self.names), "list": l})
+
+
+    def fill_sweets_queue_2(self):
+        for i in range (1, 100):
+            l = []
+            items_on_list = random.randrange(30)
+            for _ in range (items_on_list):
+                l.append({"number": random.randrange(100), "name": random.choice(self.sweets_2)})
             q.put({"id": i, "country": random.choice(self.countries), "recipient": random.choice(self.names), "list": l})
 
 def worker():
     manager = DBManager()
-    for _ in range(5):
+    while (not q.empty()):
         letter = q.get()
-        success = manager.do_transaction(letter["id"], letter["country"], letter["recipient"], letter["list"])
+        success = manager.do_transaction_no_retry(letter["id"], letter["country"], letter["recipient"], letter["list"])
+        if success:
+            with lock:
+                global successful_packs
+                successful_packs += 1
 
 
 
 if __name__ == '__main__':
+    global successful_packs
+    successful_packs = 0
 
     manager = DBManager()
     data_generator = DataGenerator()
 
     manager.delete_db()
     manager.create_db()
-    manager.fill_db(data_generator.get_sweets(), data_generator.get_resemblance())
+    manager.fill_db(data_generator.get_sweets_2(), data_generator.get_resemblance_2())
 
     data_generator.fill_sweets_queue_2()
 
+    start_time = time.time()
+
     # worker()
     threads = []
-    for _ in range(5):
+    for _ in range(20):
         t = threading.Thread(target=worker)
         threads.append(t)
         t.start()
+
+    for t in threads:
+        t.join()
+
+    print("Successfull packs: ", successful_packs)
+    print("Time taken: ", (time.time() - start_time))
