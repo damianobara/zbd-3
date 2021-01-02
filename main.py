@@ -106,15 +106,13 @@ class DBManager:
     def do_transaction_no_retry(self, id, country, recipent, sweets_list):
         try:
             # todo change me
-            self.set_isolation_level("READ_UNCOMMITTED")
+            self.set_isolation_level("SERIALIZABLE")
 
             cur = self.conn.cursor()
 
             cur.execute("INSERT INTO packs(id, country, recipent) VALUES(%s, %s, %s)", (id, country, recipent))
-            assert (cur.rowcount == 1)
 
             # przyjmujemy zalozenie, ze wysylamy paczki jednego typu
-            print(recipent, sweets_list)
             for sweet in sweets_list:
                 found_sweet = False
 
@@ -141,17 +139,17 @@ class DBManager:
                         break
 
                 if not found_sweet:
-                    print("ERROR")
+                    print("CANT FIND SWEETS")
                     self.conn.rollback()
-                    return False
+                    return "fail"
 
             self.conn.commit()
-            print("SUCCESS SUCCESS SUCCESS SUCCESS SUCCESS SUCCESS SUCCESS")
-            return True
+            print("SUCCESS")
+            return "success"
 
         except (Exception, psycopg2.DatabaseError) as error:
-            # with lock:
-            print("error", error)
+            self.conn.rollback()
+            return "retry"
 
 
 class DataGenerator:
@@ -165,10 +163,10 @@ class DataGenerator:
 
     def get_sweets_1(self):
         sweets_list = []
-        sweets_list.append(('chocolate', 5))
-        sweets_list.append(('lollypop', 100))
-        sweets_list.append(('biscuit', 5))
-        sweets_list.append(('cake', 100))
+        sweets_list.append(('chocolate', 1000))
+        sweets_list.append(('lollypop', 300))
+        sweets_list.append(('biscuit', 1000))
+        sweets_list.append(('cake', 300))
         return sweets_list
     
     def get_sweets_2(self):
@@ -200,18 +198,18 @@ class DataGenerator:
     #         q.put({"id": i, "number": random.randrange(50), "sweet": random.choice(self.sweets)})
 
     def fill_sweets_queue_1(self):
-        for i in range (1, 1000):
+        for i in range (1, 30):
             l = []
-            items_on_list = random.randrange(4)
+            items_on_list = random.randrange(20)
             for _ in range (items_on_list):
                 l.append({"number": random.randrange(20), "name": random.choice(self.sweets_1)})
             q.put({"id": i, "country": random.choice(self.countries), "recipient": random.choice(self.names), "list": l})
 
 
     def fill_sweets_queue_2(self):
-        for i in range (1, 100):
+        for i in range (1, 50):
             l = []
-            items_on_list = random.randrange(30)
+            items_on_list = random.randrange(20)
             for _ in range (items_on_list):
                 l.append({"number": random.randrange(100), "name": random.choice(self.sweets_2)})
             q.put({"id": i, "country": random.choice(self.countries), "recipient": random.choice(self.names), "list": l})
@@ -219,16 +217,33 @@ class DataGenerator:
 def worker():
     manager = DBManager()
     while (not q.empty()):
+        global in_queue
+        with lock:
+            in_queue -= 1
+            print(in_queue)
         letter = q.get()
-        success = manager.do_transaction_no_retry(letter["id"], letter["country"], letter["recipient"], letter["list"])
-        if success:
-            with lock:
-                global successful_packs
-                successful_packs += 1
+        how_many = 0
+        while (True):
+            how_many += 1
+            if how_many >= 10:
+                print("MORE THAN 10")
+                return
+            code = manager.do_transaction_no_retry(letter["id"], letter["country"], letter["recipient"], letter["list"])
+            if code == "retry":
+                # sleep_time = random.randrange(0, 10)
+                # time.sleep(sleep_time)
+                continue
+            if code == "success" or code == "fail":
+                with lock:
+                    global successful_packs
+                    successful_packs += 1
+            break
 
 
 
 if __name__ == '__main__':
+    global in_queue
+    in_queue = 50
     global successful_packs
     successful_packs = 0
 
